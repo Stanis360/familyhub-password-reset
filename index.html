@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>FamilyHub – Passwort zurücksetzen</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color-scheme:dark}
+    *{box-sizing:border-box}body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 25% 5%,#174e80 0%,#101b31 48%,#0b1220 100%);color:#f2f6ff}
+    .card{width:min(100%,430px);padding:32px;border:1px solid #30425a;border-radius:22px;background:#142237;box-shadow:0 20px 80px #0006}
+    .mark{font-size:34px}h1{font-size:25px;margin:12px 0 8px}p{color:#b9c9db;line-height:1.55}label{display:block;font-size:14px;margin-top:22px;margin-bottom:8px}
+    input{width:100%;padding:13px 14px;border:1px solid #4a5c72;border-radius:11px;background:#0e1929;color:white;font-size:16px}input:focus{outline:2px solid #56a9fa}
+    button{width:100%;padding:14px;border:0;border-radius:11px;background:#368fea;color:#fff;font-size:16px;font-weight:650;cursor:pointer;margin-top:20px}button:disabled{opacity:.5;cursor:default}
+    .note{font-size:13px;color:#9aaec2;margin-top:18px}.status{margin:16px 0 0;padding:12px;border-radius:10px;background:#253954;line-height:1.45}.error{background:#542733;color:#ffd5da}.success{background:#174735;color:#b5ffdc}
+    [hidden]{display:none!important}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="mark" aria-hidden="true">🏠</div>
+    <h1>FamilyHub</h1>
+    <p>Neues Passwort festlegen</p>
+    <div id="status" class="status" role="status">Wiederherstellungslink wird geprüft …</div>
+    <form id="form" hidden>
+      <label for="password">Neues Passwort (mindestens 8 Zeichen)</label>
+      <input id="password" type="password" minlength="8" autocomplete="new-password" required>
+      <label for="confirm">Passwort wiederholen</label>
+      <input id="confirm" type="password" minlength="8" autocomplete="new-password" required>
+      <button id="submit" type="submit">Passwort speichern</button>
+    </form>
+    <p class="note">Öffne diese Seite über den Link in deiner FamilyHub-Wiederherstellungs-E-Mail. Nach dem Speichern kannst du die FamilyHub-App wie gewohnt selbst öffnen.</p>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script>
+    // Öffentlich verwendbarer Supabase-Client-Schlüssel, niemals service_role oder sb_secret_ verwenden.
+    const SUPABASE_URL = 'https://xhcmqhcyybjqisshutca.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_75xt4mkpv2CUqsCBJy5BNg_kQpdbAhn';
+    const statusEl = document.getElementById('status');
+    const form = document.getElementById('form');
+    const submit = document.getElementById('submit');
+    const setStatus = (message, kind = '') => {statusEl.textContent = message; statusEl.className = 'status ' + kind;};
+    const initialHash = new URLSearchParams(location.hash.replace(/^#/, ''));
+    const initialQuery = new URLSearchParams(location.search);
+    const hasRecoveryLink = initialHash.get('type') === 'recovery' || initialQuery.get('type') === 'recovery' || initialQuery.has('code');
+    async function start() {
+      if (SUPABASE_ANON_KEY.includes('HIER_DEINEN_')) {
+        setStatus('Die Seite ist noch nicht eingerichtet: Der öffentliche Supabase-Schlüssel fehlt in der Datei index.html.', 'error');
+        return;
+      }
+      if (initialHash.has('error') || initialQuery.has('error')) {
+        setStatus('Der Link ist ungültig oder abgelaufen. Bitte fordere eine neue Wiederherstellungs-E-Mail an.', 'error');
+        return;
+      }
+      if (!hasRecoveryLink) {
+        setStatus('Bitte öffne den Wiederherstellungslink aus deiner E-Mail, nicht die Webseite direkt.','error');
+        return;
+      }
+      try {
+        if (!window.supabase || !window.supabase.createClient) throw new Error('Die benötigte Bibliothek konnte nicht geladen werden.');
+        const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+          auth: {detectSessionInUrl: true, persistSession: false, autoRefreshToken: false}
+        });
+        const {data, error} = await client.auth.getSession();
+        if (error) throw error;
+        if (!data.session) {
+          setStatus('Der Link konnte nicht bestätigt werden oder ist abgelaufen. Bitte fordere eine neue E-Mail an.', 'error');
+          return;
+        }
+        setStatus('Link bestätigt. Bitte lege jetzt dein neues Passwort fest.', 'success');
+        form.hidden = false;
+        form.addEventListener('submit', async e => {
+          e.preventDefault();
+          const password = document.getElementById('password').value;
+          const confirm = document.getElementById('confirm').value;
+          if (password.length < 8) return setStatus('Bitte mindestens 8 Zeichen verwenden.', 'error');
+          if (password !== confirm) return setStatus('Die Passwörter stimmen nicht überein.', 'error');
+          submit.disabled = true;
+          setStatus('Passwort wird gespeichert …');
+          try {
+            const {error: updateError} = await client.auth.updateUser({password});
+            if (updateError) throw updateError;
+            form.hidden = true;
+            setStatus('Dein Passwort wurde geändert. Du kannst jetzt FamilyHub selbst öffnen und dich anmelden.', 'success');
+            await client.auth.signOut({scope:'local'});
+          } catch (err) {
+            setStatus('Speichern fehlgeschlagen: ' + (err.message || 'Unbekannter Fehler'), 'error');
+          } finally {
+            submit.disabled = false;
+          }
+        });
+      } catch (err) {
+        setStatus('Der Link konnte nicht verarbeitet werden: ' + (err.message || 'Unbekannter Fehler'), 'error');
+      }
+    }
+    start();
+  </script>
+</body>
+</html>
